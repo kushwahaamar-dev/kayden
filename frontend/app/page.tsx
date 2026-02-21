@@ -215,7 +215,7 @@ export default function LandingPage() {
                         <div className="flex items-center gap-6 text-sm text-neutral-400">
                             <span className="font-mono">∞ autonomous agents</span>
                             <span className="text-neutral-600">·</span>
-                            <a href="https://twitter.com/kayden" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">
+                            <a href="https://x.com/amarkushwaha__" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">
                                 @kayden
                             </a>
                         </div>
@@ -510,7 +510,7 @@ export default function LandingPage() {
                         <div className="space-y-4">
                             <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Community</p>
                             <div className="space-y-3">
-                                <a href="https://twitter.com/kayden" target="_blank" rel="noopener noreferrer" className="footer-link block">Twitter</a>
+                                <a href="https://x.com/amarkushwaha__" target="_blank" rel="noopener noreferrer" className="footer-link block">Twitter</a>
                                 <a href="https://discord.gg" target="_blank" rel="noopener noreferrer" className="footer-link block">Discord</a>
                                 <a href="https://ethdenver.com" target="_blank" rel="noopener noreferrer" className="footer-link block">ETH Denver 2026</a>
                             </div>
