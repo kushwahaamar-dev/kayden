@@ -7,7 +7,7 @@
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.28-363636)](https://soliditylang.org)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org)
 
-**Live demo:** https://kayden.vercel.app
+**Live demo:** https://kayden-dao.vercel.app
 
 ---
 
