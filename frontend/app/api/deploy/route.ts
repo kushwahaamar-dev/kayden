@@ -5,7 +5,13 @@ import { NextResponse } from "next/server";
 
 const NFT_ADDRESS = (process.env.NEXT_PUBLIC_NFT_ADDRESS ?? "") as `0x${string}`;
 const RPC = process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC || "https://sepolia.base.org";
-const DEPLOYER_KEY = process.env.DEPLOYER_PRIVATE_KEY as `0x${string}` | undefined;
+function normalizePrivateKey(raw: string | undefined): `0x${string}` | null {
+    if (!raw) return null;
+    // Vercel env values can include trailing newlines or pasted quotes.
+    const cleaned = raw.trim().replace(/^['"]|['"]$/g, "");
+    if (!/^0x[0-9a-fA-F]{64}$/.test(cleaned)) return null;
+    return cleaned as `0x${string}`;
+}
 
 const MINT_ABI = [
     {
@@ -33,7 +39,8 @@ const MINT_ABI = [
 
 export async function POST(req: Request) {
     try {
-        if (!DEPLOYER_KEY) {
+        const deployerKey = normalizePrivateKey(process.env.DEPLOYER_PRIVATE_KEY);
+        if (!deployerKey) {
             return NextResponse.json({ error: "DEPLOYER_PRIVATE_KEY not set" }, { status: 500 });
         }
 
@@ -48,7 +55,7 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "name and strategy required" }, { status: 400 });
         }
 
-        const account = privateKeyToAccount(DEPLOYER_KEY);
+        const account = privateKeyToAccount(deployerKey);
         const publicClient = createPublicClient({ chain: baseSepolia, transport: http(RPC) });
         const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http(RPC) });
 
