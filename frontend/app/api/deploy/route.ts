@@ -2,14 +2,21 @@ import { createPublicClient, createWalletClient, http, parseEventLogs } from "vi
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
 import { NextResponse } from "next/server";
+import { isAddress } from "viem";
 
-const NFT_ADDRESS = (process.env.NEXT_PUBLIC_NFT_ADDRESS ?? "") as `0x${string}`;
 const RPC = process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC || "https://sepolia.base.org";
 function normalizePrivateKey(raw: string | undefined): `0x${string}` | null {
     if (!raw) return null;
     // Vercel env values can include trailing newlines or pasted quotes.
     const cleaned = raw.trim().replace(/^['"]|['"]$/g, "");
     if (!/^0x[0-9a-fA-F]{64}$/.test(cleaned)) return null;
+    return cleaned as `0x${string}`;
+}
+
+function normalizeAddress(raw: string | undefined): `0x${string}` | null {
+    if (!raw) return null;
+    const cleaned = raw.trim().replace(/^['"]|['"]$/g, "");
+    if (!isAddress(cleaned)) return null;
     return cleaned as `0x${string}`;
 }
 
@@ -39,7 +46,11 @@ const MINT_ABI = [
 
 export async function POST(req: Request) {
     try {
+        const nftAddress = normalizeAddress(process.env.NEXT_PUBLIC_NFT_ADDRESS);
         const deployerKey = normalizePrivateKey(process.env.DEPLOYER_PRIVATE_KEY);
+        if (!nftAddress) {
+            return NextResponse.json({ error: "NEXT_PUBLIC_NFT_ADDRESS is invalid or not set" }, { status: 500 });
+        }
         if (!deployerKey) {
             return NextResponse.json({ error: "DEPLOYER_PRIVATE_KEY not set" }, { status: 500 });
         }
@@ -60,7 +71,7 @@ export async function POST(req: Request) {
         const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http(RPC) });
 
         const hash = await walletClient.writeContract({
-            address: NFT_ADDRESS,
+            address: nftAddress,
             abi: MINT_ABI,
             functionName: "mintAgent",
             args: [name, strategy, BigInt(interval || 30)],
