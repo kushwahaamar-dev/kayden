@@ -1,0 +1,24 @@
+{
+    "name": "agenthaven",
+    "version": "1.0.0",
+    "private": true,
+    "description": "Solving the Homeless Agent Problem — Permanent homes for AI agents that never run out of gas, never need servers, and never die.",
+    "scripts": {
+        "dev": "cd frontend && npm run dev",
+        "build": "cd frontend && npm run build",
+        "contracts:build": "cd contracts && forge build",
+        "contracts:test": "cd contracts && forge test",
+        "contracts:deploy": "cd contracts && forge script script/Deploy.s.sol --broadcast"
+    },
+    "keywords": [
+        "ethereum",
+        "ai-agents",
+        "defi",
+        "erc-7857",
+        "erc-4337",
+        "hedera",
+        "0g",
+        "kite"
+    ],
+    "license": "MIT"
+}
