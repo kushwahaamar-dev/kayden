@@ -103,64 +103,85 @@ async function fetchAllAgentsBatched(client: ReturnType<typeof getClient>): Prom
     const count = Number(total);
     if (!count) return [];
 
-    const ids = Array.from({ length: count }, (_, i) => i + 1);
+    // Show newest agents first so freshly minted agents are visible immediately.
+    const ids = Array.from({ length: count }, (_, i) => count - i);
     const hasRelay = isConfiguredAddress(CONTRACTS.baseRelay);
     const hasPM = isConfiguredAddress(CONTRACTS.paymaster);
 
-    const calls: any[] = [];
-    const callMap: { id: number; field: string; idx: number }[] = [];
+    const dataById = new Map<number, Record<string, any>>();
+    ids.forEach((id) => dataById.set(id, {}));
 
-    for (const id of ids) {
-        callMap.push({ id, field: "config", idx: calls.length });
-        calls.push({
-            address: CONTRACTS.agentHavenNFT,
-            abi: AGENT_HAVEN_NFT_ABI,
-            functionName: "getAgentConfig",
-            args: [BigInt(id)],
+    // 1) Fetch configs first. If this succeeds, agent will appear even if stats fail.
+    const configCalls = ids.map((id) => ({
+        address: CONTRACTS.agentHavenNFT,
+        abi: AGENT_HAVEN_NFT_ABI,
+        functionName: "getAgentConfig" as const,
+        args: [BigInt(id)],
+    }));
+    try {
+        const configResults = await client.multicall({ contracts: configCalls, allowFailure: true });
+        configResults.forEach((r, idx) => {
+            if (r.status === "success") dataById.get(ids[idx])!.config = r.result;
         });
-
-        if (hasRelay) {
-            callMap.push({ id, field: "relayStats", idx: calls.length });
-            calls.push({
-                address: CONTRACTS.baseRelay,
-                abi: BASE_RELAY_ABI,
-                functionName: "getAgentStats",
-                args: [BigInt(id)],
-            });
-            callMap.push({ id, field: "lastAction", idx: calls.length });
-            calls.push({
-                address: CONTRACTS.baseRelay,
-                abi: BASE_RELAY_ABI,
-                functionName: "getLastAction",
-                args: [BigInt(id)],
-            });
-        }
-
-        if (hasPM) {
-            callMap.push({ id, field: "pmStats", idx: calls.length });
-            calls.push({
-                address: CONTRACTS.paymaster,
-                abi: PAYMASTER_ABI,
-                functionName: "getAgentGasStats",
-                args: [BigInt(id)],
-            });
+    } catch {
+        // Fallback: sequential config reads to avoid total failure.
+        for (const id of ids) {
+            try {
+                const config = await client.readContract({
+                    address: CONTRACTS.agentHavenNFT,
+                    abi: AGENT_HAVEN_NFT_ABI,
+                    functionName: "getAgentConfig",
+                    args: [BigInt(id)],
+                });
+                dataById.get(id)!.config = config;
+            } catch { /* ignore per-agent */ }
         }
     }
 
-    const results = await client.multicall({ contracts: calls, allowFailure: true });
+    if (hasRelay) {
+        const relayCalls = ids.flatMap((id) => ([
+            {
+                address: CONTRACTS.baseRelay,
+                abi: BASE_RELAY_ABI,
+                functionName: "getAgentStats" as const,
+                args: [BigInt(id)],
+            },
+            {
+                address: CONTRACTS.baseRelay,
+                abi: BASE_RELAY_ABI,
+                functionName: "getLastAction" as const,
+                args: [BigInt(id)],
+            },
+        ]));
+        try {
+            const relayResults = await client.multicall({ contracts: relayCalls, allowFailure: true });
+            ids.forEach((id, i) => {
+                const statsR = relayResults[i * 2];
+                const actionR = relayResults[i * 2 + 1];
+                if (statsR?.status === "success") dataById.get(id)!.relayStats = statsR.result;
+                if (actionR?.status === "success") dataById.get(id)!.lastAction = actionR.result;
+            });
+        } catch { /* keep zero defaults */ }
+    }
 
-    const agentDataMap = new Map<number, Record<string, any>>();
-    for (const entry of callMap) {
-        if (!agentDataMap.has(entry.id)) agentDataMap.set(entry.id, {});
-        const r = results[entry.idx];
-        if (r.status === "success") {
-            agentDataMap.get(entry.id)![entry.field] = r.result;
-        }
+    if (hasPM) {
+        const pmCalls = ids.map((id) => ({
+            address: CONTRACTS.paymaster,
+            abi: PAYMASTER_ABI,
+            functionName: "getAgentGasStats" as const,
+            args: [BigInt(id)],
+        }));
+        try {
+            const pmResults = await client.multicall({ contracts: pmCalls, allowFailure: true });
+            pmResults.forEach((r, idx) => {
+                if (r.status === "success") dataById.get(ids[idx])!.pmStats = r.result;
+            });
+        } catch { /* keep zero defaults */ }
     }
 
     const agents: AgentData[] = [];
     for (const id of ids) {
-        const data = agentDataMap.get(id);
+        const data = dataById.get(id);
         if (!data?.config) continue;
         agents.push(parseAgent(id, data.config, data.relayStats, data.lastAction, data.pmStats));
     }
