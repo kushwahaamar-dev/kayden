@@ -11,7 +11,6 @@ evm_version = "cancun"
 [rpc_endpoints]
 base_sepolia = "${BASE_SEPOLIA_RPC}"
 hedera_testnet = "${NEXT_PUBLIC_HEDERA_TESTNET_RPC}"
-0g_testnet = "https://evmrpc-testnet.0g.ai"
 
 [etherscan]
 base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }

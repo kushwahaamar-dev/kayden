@@ -5,8 +5,6 @@ import { useAllAgents } from "@/hooks/useAgent";
 import { useLiveActions } from "@/hooks/useLiveActions";
 import { LiveActivityFeed } from "@/components/LiveActivityFeed";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
     Activity,
@@ -18,26 +16,16 @@ import {
     TerminalSquare,
     ExternalLink,
     ArrowRight,
+    Bot,
+    TrendingUp,
+    Rocket,
+    Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import confetti from "canvas-confetti";
 import { motion, type Variants } from "framer-motion";
 import { fetchProposals, fetchTreasuryBalance, NounsProposal } from "@/lib/nounsBuilder";
-import { useWriteContract, useAccount } from "wagmi";
-
-const NOUNS_GOVERNOR_ABI = [
-    {
-        "inputs": [
-            { "internalType": "uint256", "name": "proposalId", "type": "uint256" },
-            { "internalType": "uint8", "name": "support", "type": "uint8" }
-        ],
-        "name": "castVote",
-        "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    }
-] as const;
 
 const containerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -57,65 +45,15 @@ const itemVariants: Variants = {
 };
 
 export default function DashboardPage() {
+    const { agents, loading: agentsLoading, stats } = useAllAgents();
     const { actions, isConnected, onNewAction } = useLiveActions();
     const [proposals, setProposals] = useState<NounsProposal[]>([]);
     const [treasury, setTreasury] = useState<number>(0);
-    const [delegateCount, setDelegateCount] = useState<number>(0);
-    const [isVoting, setIsVoting] = useState<string | null>(null);
-
-    const { writeContractAsync } = useWriteContract();
-    const { address } = useAccount();
 
     useEffect(() => {
-        fetchProposals().then(setProposals);
-        fetchTreasuryBalance().then(setTreasury);
-        // Derive delegate count from Hedera real tx data
-        import('@/lib/hedera').then(({ getAccountTransactions }) => {
-            getAccountTransactions('0.0.7981295', 25).then(txs => {
-                setDelegateCount(Math.max(txs.length * 14, 3)); // Active participants
-            });
-        });
+        fetchProposals().then(setProposals).catch(() => {});
+        fetchTreasuryBalance().then(setTreasury).catch(() => {});
     }, []);
-
-    const handleCastVote = async (proposalIdStr: string) => {
-        if (!address) {
-            toast.error("Wallet not connected", { description: "Please connect your wallet to participate in DAO governance." });
-            return;
-        }
-
-        setIsVoting(proposalIdStr);
-        const toastId = toast.loading("Preparing castVote transaction...");
-
-        try {
-            const realId = proposalIdStr.replace("prop-", "");
-            const proposalIdBigInt = realId.startsWith("0x") ? BigInt(realId) : BigInt("0x" + realId);
-
-            const hash = await writeContractAsync({
-                address: "0x38De4AECDE2398dB907B8A0D9FccFE3DF2A3c035",
-                abi: NOUNS_GOVERNOR_ABI,
-                functionName: "castVote",
-                args: [proposalIdBigInt, 1]
-            });
-
-            toast.success("Vote Cast Initiated!", {
-                id: toastId,
-                description: `Tx Submitted: ${hash.slice(0, 8)}...${hash.slice(-6)}`,
-            });
-
-            confetti({
-                particleCount: 80,
-                spread: 60,
-                origin: { y: 0.7 },
-                colors: ["#e8d5b7", "#c4956a"]
-            });
-
-        } catch (e: any) {
-            console.error(e);
-            toast.error("Voting Transaction Failed", { id: toastId, description: e.shortMessage || e.message || "User rejected." });
-        } finally {
-            setIsVoting(null);
-        }
-    };
 
     useEffect(() => {
         onNewAction((action) => {
@@ -154,20 +92,35 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-3">
                         <div className="moonbird-badge">
                             <div className={`h-2 w-2 rounded-full ${isConnected ? "bg-emerald-400 animate-pulse" : "bg-neutral-600"}`} />
-                            {isConnected ? "Hedera WS Live" : "Connecting"}
+                            {isConnected ? "Live" : "Connecting"}
                         </div>
+                        <Link href="/deploy">
+                            <Button size="sm" className="bg-white text-black hover:bg-neutral-200 rounded-full h-9 px-5 text-sm font-medium">
+                                <Rocket className="h-3.5 w-3.5 mr-1.5" /> Deploy
+                            </Button>
+                        </Link>
                     </div>
                 </div>
             </nav>
 
             <main className="max-w-7xl mx-auto px-6 py-10 space-y-10">
-                {/* Protocol Health & Treasury */}
+                {/* Protocol Stats */}
                 <motion.div
                     variants={containerVariants}
                     initial="hidden"
                     animate="show"
                     className="grid grid-cols-2 lg:grid-cols-4 gap-4"
                 >
+                    <motion.div variants={itemVariants}>
+                        <div className="collection-card p-6">
+                            <div className="flex items-center gap-2 text-neutral-500 mb-3">
+                                <Bot className="h-4 w-4" />
+                                <span className="text-xs uppercase tracking-wider font-medium">Total Agents</span>
+                            </div>
+                            <div className="text-3xl font-mono text-white">{stats.totalAgents}</div>
+                            <span className="text-xs text-neutral-500 mt-1 block">Minted on Base Sepolia</span>
+                        </div>
+                    </motion.div>
                     <motion.div variants={itemVariants}>
                         <div className="collection-card p-6">
                             <div className="flex items-center gap-2 text-neutral-500 mb-3">
@@ -178,51 +131,130 @@ export default function DashboardPage() {
                             <span className="text-xs text-neutral-500 mt-1 block">ETH controlled by DAO</span>
                         </div>
                     </motion.div>
-
                     <motion.div variants={itemVariants}>
                         <div className="collection-card p-6">
                             <div className="flex items-center gap-2 text-neutral-500 mb-3">
-                                <Users className="h-4 w-4" />
-                                <span className="text-xs uppercase tracking-wider font-medium">Active Delegates</span>
+                                <TrendingUp className="h-4 w-4" />
+                                <span className="text-xs uppercase tracking-wider font-medium">Total Earnings</span>
                             </div>
-                            <div className="text-3xl font-mono text-white">{delegateCount || '--'}</div>
-                            <span className="text-xs text-neutral-500 mt-1 block">Noun voting members</span>
+                            <div className="text-3xl font-mono text-white">{stats.totalEarnings.toFixed(4)}</div>
+                            <span className="text-xs text-neutral-500 mt-1 block">ETH earned by agents</span>
                         </div>
                     </motion.div>
-
-                    <motion.div variants={itemVariants} className="lg:col-span-2">
-                        <div className="collection-card h-full p-6 flex flex-col justify-center space-y-2">
-                            <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium text-neutral-500">Uniswap API Dev Integration</span>
-                                <span className="moonbird-badge text-emerald-400 border-emerald-500/20">Connected</span>
+                    <motion.div variants={itemVariants}>
+                        <div className="collection-card p-6">
+                            <div className="flex items-center gap-2 text-neutral-500 mb-3">
+                                <Activity className="h-4 w-4" />
+                                <span className="text-xs uppercase tracking-wider font-medium">Live Actions</span>
                             </div>
-                            <p className="text-sm text-neutral-300">
-                                0G AI Brain is currently routing DAO treasury liquidity via the Uniswap Developer Platform API for optimal spot MEV protection.
-                            </p>
+                            <div className="text-3xl font-mono text-white">{actions.length}</div>
+                            <span className="text-xs text-neutral-500 mt-1 block">Hedera + Base combined</span>
                         </div>
                     </motion.div>
                 </motion.div>
 
-                {/* Main Content Grid: Proposals vs Live Feed */}
+                {/* Agents Grid */}
                 <motion.div
                     initial={{ opacity: 0, y: 24 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3, duration: 0.5 }}
+                    transition={{ delay: 0.2, duration: 0.5 }}
+                    className="space-y-6"
+                >
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-3xl mb-1">Your Agents</h2>
+                            <p className="text-sm text-neutral-500">On-chain autonomous agents with iNFT identity</p>
+                        </div>
+                        <Link href="/deploy">
+                            <Button className="bg-white text-black hover:bg-neutral-200 rounded-full text-sm font-medium">
+                                <Rocket className="w-4 h-4 mr-2" />
+                                Deploy New Agent
+                            </Button>
+                        </Link>
+                    </div>
+
+                    {agentsLoading ? (
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {[1, 2, 3].map((i) => (
+                                <div key={i} className="collection-card p-6 animate-pulse space-y-4">
+                                    <div className="h-6 bg-white/5 rounded w-32" />
+                                    <div className="h-4 bg-white/5 rounded w-48" />
+                                    <div className="h-10 bg-white/5 rounded w-24" />
+                                </div>
+                            ))}
+                        </div>
+                    ) : agents.length === 0 ? (
+                        <div className="collection-card p-12 text-center space-y-4">
+                            <Bot className="h-10 w-10 mx-auto text-neutral-600" />
+                            <div className="space-y-2">
+                                <h3 className="text-lg font-medium text-neutral-400">No agents deployed yet</h3>
+                                <p className="text-sm text-neutral-600 max-w-sm mx-auto">
+                                    Deploy your first autonomous AI agent to start earning yield on-chain.
+                                </p>
+                            </div>
+                            <Link href="/deploy">
+                                <Button className="bg-white text-black hover:bg-neutral-200 rounded-full">
+                                    <Rocket className="h-4 w-4 mr-2" /> Deploy First Agent
+                                </Button>
+                            </Link>
+                        </div>
+                    ) : (
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {agents.map((agent) => (
+                                <Link key={agent.id} href={`/agents/${agent.id}`}>
+                                    <div className="collection-card p-6 space-y-4 hover:border-white/[0.15] transition-all cursor-pointer group">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`h-2.5 w-2.5 rounded-full ${agent.active ? "bg-emerald-400 animate-pulse" : "bg-neutral-600"}`} />
+                                                <h3 className="text-lg font-semibold text-white group-hover:text-white/90">{agent.name}</h3>
+                                            </div>
+                                            <span className="moonbird-badge text-[10px]">#{agent.id}</span>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="moonbird-badge text-[10px]">{agent.strategyHash}</span>
+                                            <span className="moonbird-badge text-[10px]">{agent.heartbeatInterval}s</span>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-4 pt-2 border-t border-white/[0.06]">
+                                            <div>
+                                                <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Earnings</p>
+                                                <p className="text-lg font-mono text-white">{agent.totalEarnings.toFixed(4)}</p>
+                                                <p className="text-[10px] text-neutral-600">ETH</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Actions</p>
+                                                <p className="text-lg font-mono text-white">{agent.totalActions}</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center justify-between pt-2">
+                                            <span className="text-[10px] text-neutral-600 font-mono">
+                                                TBA: {agent.boundAccount.slice(0, 8)}...{agent.boundAccount.slice(-4)}
+                                            </span>
+                                            <ArrowRight className="h-3.5 w-3.5 text-neutral-600 group-hover:text-white transition-colors" />
+                                        </div>
+                                    </div>
+                                </Link>
+                            ))}
+                        </div>
+                    )}
+                </motion.div>
+
+                {/* Proposals + Live Feed */}
+                <motion.div
+                    initial={{ opacity: 0, y: 24 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4, duration: 0.5 }}
                     className="grid lg:grid-cols-3 gap-8"
                 >
                     {/* Nouns Builder Proposals */}
                     <div className="lg:col-span-2 space-y-6">
                         <div className="flex items-center justify-between">
                             <div>
-                                <h2 className="text-3xl mb-1">Active Proposals</h2>
+                                <h2 className="text-3xl mb-1">DAO Proposals</h2>
                                 <p className="text-sm text-neutral-500">Nouns Builder governed agent strategies</p>
                             </div>
-                            <Link href="/deploy">
-                                <Button className="bg-white text-black hover:bg-neutral-200 rounded-full text-sm font-medium">
-                                    <Vote className="w-4 h-4 mr-2" />
-                                    Propose Strategy
-                                </Button>
-                            </Link>
                         </div>
 
                         <div className="space-y-4">
@@ -232,7 +264,7 @@ export default function DashboardPage() {
                                     <div className="space-y-2">
                                         <h3 className="text-lg font-medium text-neutral-400">No active proposals</h3>
                                         <p className="text-sm text-neutral-600 max-w-sm mx-auto">
-                                            Proposals from the Nouns Builder DAO on Base Mainnet will appear here. Use the button above to propose a new strategy.
+                                            Proposals from the Nouns Builder DAO will appear here.
                                         </p>
                                     </div>
                                 </div>
@@ -240,31 +272,18 @@ export default function DashboardPage() {
                                 proposals.map((prop) => (
                                     <div
                                         key={prop.id}
-                                        onClick={() => prop.state === "Active" ? handleCastVote(prop.id) : null}
-                                        className={`collection-card p-6 ${prop.state === "Active" ? "cursor-pointer hover:border-white/[0.15]" : "opacity-60"}`}
+                                        className="collection-card p-6"
                                     >
                                         <div className="flex justify-between items-start mb-4">
                                             <div className="space-y-2">
                                                 <div className="flex items-center gap-3">
                                                     <span className="text-xs font-mono text-neutral-600">{prop.id}</span>
                                                     <span className={`moonbird-badge ${prop.state === "Active" ? "text-emerald-400 border-emerald-500/30" : ""}`}>
-                                                        {isVoting === prop.id ? "Signing Tx..." : prop.state}
+                                                        {prop.state}
                                                     </span>
                                                 </div>
                                                 <h3 className="text-xl font-sans font-semibold text-white">{prop.title}</h3>
                                                 <p className="text-sm text-neutral-500 max-w-xl">{prop.description}</p>
-                                            </div>
-                                            <div className="text-right hidden md:block">
-                                                <span className="text-xs text-neutral-600">Proposer</span>
-                                                <a
-                                                    href={`https://basescan.org/address/${prop.proposer}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="text-sm font-mono text-neutral-400 hover:text-white transition-colors block"
-                                                >
-                                                    {prop.proposer.slice(0, 6)}...{prop.proposer.slice(-4)}
-                                                </a>
                                             </div>
                                         </div>
 
@@ -283,22 +302,12 @@ export default function DashboardPage() {
                                             />
                                             <div className="flex items-center justify-between pt-1">
                                                 <a
-                                                    href={prop.daoAddress ? `https://nouns.build/dao/base/${prop.daoAddress}/${prop.proposalHash}` : '#'}
+                                                    href={prop.daoAddress ? `https://nouns.build/dao/base/${prop.daoAddress}/${prop.proposalHash}` : "#"}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    onClick={(e) => e.stopPropagation()}
                                                     className="flex items-center gap-1 text-[10px] text-neutral-600 hover:text-white transition-colors"
                                                 >
                                                     Verify on nouns.build <ExternalLink className="h-2.5 w-2.5" />
-                                                </a>
-                                                <a
-                                                    href={`https://basescan.org/address/${prop.proposer}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="text-[10px] text-neutral-600 hover:text-white transition-colors"
-                                                >
-                                                    View Proposer ↗
                                                 </a>
                                             </div>
                                         </div>
@@ -308,18 +317,20 @@ export default function DashboardPage() {
                         </div>
                     </div>
 
-                    {/* Hedera Real-Time Observer Panel */}
+                    {/* Live Activity Feed */}
                     <div className="lg:col-span-1 space-y-6">
                         <div className="flex items-center justify-between">
                             <h2 className="text-3xl">Observer</h2>
-                            <ExternalLink className="w-4 h-4 text-neutral-600" />
+                            <div className="flex items-center gap-2">
+                                <Zap className="w-4 h-4 text-neutral-400" />
+                            </div>
                         </div>
                         <div className="collection-card overflow-hidden">
                             <div className="px-6 py-4 border-b border-white/[0.06]">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
                                         <Activity className="h-4 w-4 text-neutral-400" />
-                                        <span className="text-sm font-medium">Live Hedera Actions</span>
+                                        <span className="text-sm font-medium">Live Actions</span>
                                     </div>
                                     <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
                                 </div>

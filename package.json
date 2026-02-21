@@ -14,11 +14,13 @@
         "ethereum",
         "ai-agents",
         "defi",
-        "erc-7857",
+        "iNFT",
+        "erc-6551",
         "erc-4337",
         "hedera",
-        "0g",
-        "kite"
+        "base",
+        "uniswap",
+        "nouns-builder"
     ],
     "license": "MIT"
 }

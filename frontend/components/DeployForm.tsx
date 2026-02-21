@@ -14,10 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Rocket, Loader2, CheckCircle2, Shield, Brain, Timer } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useSendTransaction, useAccount } from "wagmi";
 import { toast } from "sonner";
-import { uploadToStorage, evaluateStrategy } from "@/lib/zeroG";
-import { registerPassport } from "@/lib/kite";
 import { buildScheduleConfig } from "@/lib/hedera";
 import { CONTRACTS } from "@/lib/contracts";
 
@@ -56,10 +53,9 @@ const INTERVALS = [
 type DeployStep = "config" | "deploying" | "complete";
 
 interface DeployResult {
-    strategyHash: string;
-    passportId: string;
+    tokenId: number;
+    txHash: string;
     scheduleConfig: string;
-    inferenceAction: string;
 }
 
 export function DeployForm() {
@@ -72,9 +68,6 @@ export function DeployForm() {
     const [deployLogs, setDeployLogs] = useState<string[]>([]);
     const [deployResult, setDeployResult] = useState<DeployResult | null>(null);
 
-    const { sendTransactionAsync } = useSendTransaction();
-    const { address } = useAccount();
-
     const addLog = (msg: string) => {
         setDeployLogs((prev) => [...prev, msg]);
     };
@@ -82,123 +75,57 @@ export function DeployForm() {
     const handleDeploy = async () => {
         if (!name || !strategy) return;
 
-        if (!address) {
-            toast.error("Wallet not connected", { description: "Please connect your wallet to deploy an agent." });
-            return;
-        }
-
         setStep("deploying");
         setDeployLogs([]);
         setDeployProgress(0);
 
         const result: DeployResult = {
-            strategyHash: "",
-            passportId: "",
+            tokenId: 0,
+            txHash: "",
             scheduleConfig: "",
-            inferenceAction: "",
         };
 
         try {
-            // ═══ Step 1: Mint NFT (real on-chain tx) ═══
             addLog("Connecting to Base Sepolia...");
             setDeployProgress(5);
-            await new Promise(r => setTimeout(r, 500));
 
-            addLog("Minting ERC-7857 iNFT... (Waiting for Signature)");
+            addLog("Minting agent iNFT on Base Sepolia...");
             setDeployProgress(10);
 
-            const hash = await sendTransactionAsync({
-                to: address,
-                data: "0x1249c58b0000000000000000000000000000000000000000000000000000000000000020",
-                value: BigInt(0)
+            const resp = await fetch("/api/deploy", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name,
+                    strategy,
+                    interval: parseInt(interval),
+                }),
             });
+
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                throw new Error(data.error || "Mint failed");
+            }
+
+            result.txHash = data.txHash;
+            result.tokenId = data.tokenId;
 
             setDeployLogs((prev) => {
                 const newLogs = [...prev];
-                newLogs[newLogs.length - 1] = `✓ ERC-7857 iNFT Minted — Tx: ${hash.slice(0, 10)}...`;
+                newLogs[newLogs.length - 1] = `✓ Agent iNFT Minted — Token #${data.tokenId}, Tx: ${data.txHash.slice(0, 10)}...`;
                 return newLogs;
             });
-            toast.success("Agent NFT Minted On-Chain!", { description: `Hash: ${hash.slice(0, 10)}...` });
-            setDeployProgress(20);
-            await new Promise(r => setTimeout(r, 800));
-
-            // ═══ Step 2: Upload strategy to 0G Storage (REAL) ═══
-            addLog("📦 Uploading strategy to 0G Storage Network...");
-            setDeployProgress(25);
-
-            const strategyData = JSON.stringify({
-                name: strategy,
-                agent: name,
-                version: "1.0.0",
-                owner: address,
-                createdAt: new Date().toISOString(),
-                parameters: {
-                    riskLevel: strategy.includes("conservative") ? "low" : strategy.includes("aggressive") ? "high" : "medium",
-                    protocols: ["aave_v3", "uniswap_v4", "compound_v3"],
-                    rebalanceThreshold: 0.05,
-                },
+            toast.success("Agent NFT Minted On-Chain!", {
+                description: `Token #${data.tokenId} — ${data.txHash.slice(0, 14)}...`,
             });
-
-            const storageResult = await uploadToStorage(strategyData);
-            result.strategyHash = storageResult.hash;
-            addLog(`✓ 0G Storage — Hash: ${storageResult.hash.slice(0, 16)}... (${storageResult.size} bytes)`);
-            setDeployProgress(35);
-            await new Promise(r => setTimeout(r, 500));
-
-            // ═══ Step 3: 0G Compute — AI Strategy Evaluation (REAL) ═══
-            addLog("🧠 Running 0G Compute AI inference for initial strategy evaluation...");
             setDeployProgress(40);
 
-            const inference = await evaluateStrategy(1, result.strategyHash, {
-                eth_price: 3200,
-                gas_gwei: 0.01,
-                aave_apy: 4.2,
-                compound_apy: 3.8,
-                uniswap_volume_24h: 850000000,
-            });
-            result.inferenceAction = `${inference.action} → ${inference.protocol} (${inference.asset}, confidence: ${(inference.confidence * 100).toFixed(0)}%)`;
-            addLog(`✓ 0G AI recommends: ${result.inferenceAction}`);
-            setDeployProgress(50);
-            await new Promise(r => setTimeout(r, 500));
-
-            // ═══ Step 4: Deploy TBA (ERC-6551) ═══
-            addLog("Deploying Token Bound Account (ERC-6551)...");
-            setDeployProgress(55);
-            await new Promise(r => setTimeout(r, 600));
-            addLog("✓ TBA deployed as agent wallet");
-            setDeployProgress(60);
-
-            // ═══ Step 5: Initialize AA Wallet (ERC-4337) ═══
-            addLog("Initializing AA Wallet (ERC-4337 EntryPoint v0.7)...");
-            setDeployProgress(65);
-            await new Promise(r => setTimeout(r, 600));
-            addLog("✓ AA Wallet ready — gasless execution enabled");
+            addLog("Building Hedera HIP-1215 heartbeat schedule payload...");
             setDeployProgress(70);
 
-            // ═══ Step 6: Register Kite Agent Passport (REAL API) ═══
-            addLog("🪪 Registering Kite x402 Agent Passport...");
-            setDeployProgress(75);
-
-            const passport = await registerPassport({
-                agentName: name,
-                ownerAddress: address,
-                nftContract: CONTRACTS.agentHavenNFT,
-                tokenId: Date.now() % 10000,
-                chainId: 84532,
-                capabilities: ["defi_swap", "defi_supply", "defi_harvest", "governance_vote"],
-                strategyHash: result.strategyHash,
-            });
-            result.passportId = passport.passportId;
-            addLog(`✓ Kite Passport: ${passport.passportId.slice(0, 20)}... (x402: ${passport.x402Token?.slice(0, 12)}...)`);
-            setDeployProgress(80);
-            await new Promise(r => setTimeout(r, 500));
-
-            // ═══ Step 7: Create Hedera HIP-1215 Schedule (REAL) ═══
-            addLog("⏰ Creating Hedera HIP-1215 scheduled heartbeat...");
-            setDeployProgress(85);
-
             const scheduleConfig = buildScheduleConfig(
-                passport.tokenId,
+                data.tokenId,
                 parseInt(interval),
                 CONTRACTS.baseRelay
             );
@@ -207,28 +134,16 @@ export function DeployForm() {
             addLog(`  ↳ Target: ${scheduleConfig.targetContract.slice(0, 10)}... every ${interval}s`);
             addLog(`  ↳ Calldata: ${scheduleConfig.calldata.slice(0, 20)}...`);
             setDeployProgress(90);
-            await new Promise(r => setTimeout(r, 500));
 
-            // ═══ Step 8: Fund Paymaster ═══
-            addLog("💰 Funding ADI Paymaster with initial deposit...");
-            setDeployProgress(93);
-            await new Promise(r => setTimeout(r, 500));
-            addLog("✓ Paymaster funded — self-sustaining gas active");
-            setDeployProgress(96);
-
-            // ═══ Step 9: Start Loop ═══
-            addLog("🚀 Starting autonomous heartbeat loop...");
-            await new Promise(r => setTimeout(r, 400));
-            addLog(`✓ Agent "${name}" is ALIVE and autonomous!`);
+            addLog("✓ Agent deployed and registered for autonomous execution.");
             setDeployProgress(100);
 
             setDeployResult(result);
-            await new Promise(r => setTimeout(r, 500));
             setStep("complete");
 
         } catch (e: any) {
             console.error(e);
-            toast.error("Deployment Failed", { description: e.shortMessage || "You must sign the transaction to deploy." });
+            toast.error("Deployment Failed", { description: e.message || "Something went wrong." });
             setStep("config");
         }
     };
@@ -258,22 +173,23 @@ export function DeployForm() {
                         </p>
                     </div>
 
-                    {/* Sponsor Integration Summary */}
                     {deployResult && (
                         <div className="bg-black/40 rounded-xl p-4 text-left space-y-3 border border-white/[0.04]">
                             <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Live Integration Proof</p>
                             <div className="space-y-2 text-xs font-mono">
                                 <div className="flex items-start gap-2">
-                                    <span className="text-emerald-400 shrink-0">0G</span>
-                                    <span className="text-neutral-400 break-all">Storage: {deployResult.strategyHash.slice(0, 24)}...</span>
-                                </div>
-                                <div className="flex items-start gap-2">
-                                    <span className="text-emerald-400 shrink-0">0G</span>
-                                    <span className="text-neutral-400 break-all">AI: {deployResult.inferenceAction}</span>
-                                </div>
-                                <div className="flex items-start gap-2">
-                                    <span className="text-blue-400 shrink-0">Kite</span>
-                                    <span className="text-neutral-400 break-all">Passport: {deployResult.passportId.slice(0, 24)}...</span>
+                                    <span className="text-white shrink-0">Base</span>
+                                    <span className="text-neutral-400 break-all">
+                                        Mint Tx:{" "}
+                                        <a
+                                            href={`https://sepolia.basescan.org/tx/${deployResult.txHash}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-400 hover:underline"
+                                        >
+                                            {deployResult.txHash.slice(0, 24)}...
+                                        </a>
+                                    </span>
                                 </div>
                                 <div className="flex items-start gap-2">
                                     <span className="text-purple-400 shrink-0">Hedera</span>
@@ -322,7 +238,7 @@ export function DeployForm() {
                         </motion.div>
                         <h2 className="text-2xl mt-4">Deploying {name}...</h2>
                         <p className="text-sm text-neutral-500">
-                            Initializing autonomous agent infrastructure
+                            Minting on-chain via Base Sepolia
                         </p>
                     </div>
 
@@ -341,13 +257,10 @@ export function DeployForm() {
                         </div>
                     </div>
 
-                    {/* Sponsor badges */}
                     <div className="flex flex-wrap gap-2">
-                        <span className={`moonbird-badge text-xs ${deployProgress >= 25 ? 'border-emerald-500/30 text-emerald-400' : ''}`}>0G Storage</span>
-                        <span className={`moonbird-badge text-xs ${deployProgress >= 40 ? 'border-emerald-500/30 text-emerald-400' : ''}`}>0G Compute</span>
-                        <span className={`moonbird-badge text-xs ${deployProgress >= 75 ? 'border-blue-500/30 text-blue-400' : ''}`}>Kite x402</span>
-                        <span className={`moonbird-badge text-xs ${deployProgress >= 85 ? 'border-purple-500/30 text-purple-400' : ''}`}>HIP-1215</span>
-                        <span className={`moonbird-badge text-xs ${deployProgress >= 10 ? 'border-emerald-500/30 text-emerald-400' : ''}`}>Base ERC-4337</span>
+                        <span className={`moonbird-badge text-xs ${deployProgress >= 20 ? 'border-white/20 text-white' : ''}`}>Base iNFT</span>
+                        <span className={`moonbird-badge text-xs ${deployProgress >= 70 ? 'border-purple-500/30 text-purple-400' : ''}`}>HIP-1215</span>
+                        <span className={`moonbird-badge text-xs ${deployProgress >= 90 ? 'border-amber-500/30 text-amber-300' : ''}`}>ADI Paymaster</span>
                     </div>
 
                     <div className="bg-black/40 rounded-xl p-4 space-y-1.5 font-mono text-xs max-h-56 overflow-y-auto border border-white/[0.04]">
@@ -388,7 +301,6 @@ export function DeployForm() {
                 </div>
 
                 <div className="space-y-6">
-                    {/* Agent Name */}
                     <div className="space-y-2">
                         <Label htmlFor="name" className="flex items-center gap-1.5 text-sm text-neutral-400">
                             <Brain className="h-3.5 w-3.5" />
@@ -403,7 +315,6 @@ export function DeployForm() {
                         />
                     </div>
 
-                    {/* Strategy */}
                     <div className="space-y-2">
                         <Label className="flex items-center gap-1.5 text-sm text-neutral-400">
                             <Shield className="h-3.5 w-3.5" />
@@ -426,7 +337,6 @@ export function DeployForm() {
                         </Select>
                     </div>
 
-                    {/* Heartbeat Interval */}
                     <div className="space-y-2">
                         <Label className="flex items-center gap-1.5 text-sm text-neutral-400">
                             <Timer className="h-3.5 w-3.5" />
@@ -449,7 +359,6 @@ export function DeployForm() {
                         </p>
                     </div>
 
-                    {/* Deploy Pipeline with Sponsor Tags */}
                     <div className="bg-black/40 rounded-xl p-5 space-y-3 border border-white/[0.04]">
                         <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider">
                             Deployment pipeline
@@ -457,32 +366,23 @@ export function DeployForm() {
                         <ul className="space-y-2.5 text-xs text-neutral-500">
                             <li className="flex items-start gap-3">
                                 <span className="text-neutral-400 mt-0.5 font-mono">01</span>
-                                <span>Mint ERC-7857 iNFT on <span className="text-white">Base Sepolia</span></span>
+                                <span>Mint agent iNFT on <span className="text-white">Base Sepolia</span></span>
                             </li>
                             <li className="flex items-start gap-3">
                                 <span className="text-neutral-400 mt-0.5 font-mono">02</span>
-                                <span>Upload strategy brain to <span className="text-emerald-400">0G Storage</span></span>
+                                <span>Prepare <span className="text-purple-400">Hedera HIP-1215</span> heartbeat calldata</span>
                             </li>
                             <li className="flex items-start gap-3">
                                 <span className="text-neutral-400 mt-0.5 font-mono">03</span>
-                                <span>Run AI evaluation via <span className="text-emerald-400">0G Compute</span></span>
+                                <span>Fund <span className="text-amber-300">ADI Paymaster</span> for gas sponsorship</span>
                             </li>
                             <li className="flex items-start gap-3">
                                 <span className="text-neutral-400 mt-0.5 font-mono">04</span>
-                                <span>Register identity via <span className="text-blue-400">Kite x402 Passport</span></span>
-                            </li>
-                            <li className="flex items-start gap-3">
-                                <span className="text-neutral-400 mt-0.5 font-mono">05</span>
-                                <span>Schedule heartbeat via <span className="text-purple-400">Hedera HIP-1215</span></span>
-                            </li>
-                            <li className="flex items-start gap-3">
-                                <span className="text-neutral-400 mt-0.5 font-mono">06</span>
-                                <span>Agent begins autonomous DeFi execution forever</span>
+                                <span>Register on BaseRelay + start autonomous execution</span>
                             </li>
                         </ul>
                     </div>
 
-                    {/* Deploy Button */}
                     <Button
                         onClick={handleDeploy}
                         disabled={!name || !strategy}

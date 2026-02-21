@@ -80,18 +80,8 @@ export async function fetchProposals(): Promise<NounsProposal[]> {
 
         // Map live Nouns Builder data to our component interface
         // The data (votes, proposer, id, timestamps) is 100% live from Base Mainnet
-        return rawProposals.map((p: any, i: number) => {
-
-            // Use real title if available, otherwise label with proposal number
-            const overrides = [
-                "Deploy Uniswap V4 Arb Agent to Base",
-                "Update 0G Strategy Hash: Bear Market LP",
-                "Fund Hedera Gas Paymaster",
-                "Rebalance USDC to WETH via Dev API",
-                "Rotate Agent Yield to Treasury"
-            ];
-
-            const title = p.title ? p.title : overrides[i] || `Protocol Update #${p.proposalId}`;
+        return rawProposals.map((p: any) => {
+            const title = p.title ? p.title : `Proposal #${p.proposalId}`;
 
             return {
                 id: `prop-${p.proposalId.slice(0, 10)}`,

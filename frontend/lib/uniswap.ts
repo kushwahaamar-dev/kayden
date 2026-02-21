@@ -129,20 +129,7 @@ export async function fetchOptimalSwapRoute(
         }
     }
 
-    // 3. Final fallback — use CoinGecko-style estimation
-    // ETH/USD approximate rate for realistic display
-    const ethPrice = 3200;
-    const isEthToUsdc = decimalsIn === 18 && decimalsOut === 6;
-    const estimatedOut = isEthToUsdc
-        ? (parseFloat(amount) * ethPrice).toFixed(6)
-        : (parseFloat(amount) / ethPrice).toFixed(18);
-
-    return {
-        path: [tokenInAddress, tokenOutAddress],
-        quote: estimatedOut,
-        gasEstimate: "0.000042",
-        source: "Market Estimate (QuoterV2 unavailable)"
-    };
+    throw new Error("Unable to fetch real Uniswap route (Trading API and QuoterV2 unavailable).");
 }
 
 // ═══════════════════════════════════════════════════════════════════

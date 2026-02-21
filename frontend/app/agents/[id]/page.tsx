@@ -7,7 +7,6 @@ import { useLiveActions } from "@/hooks/useLiveActions";
 import { LiveActivityFeed } from "@/components/LiveActivityFeed";
 import { HeartbeatCountdown } from "@/components/HeartbeatCountdown";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
     TerminalSquare,
@@ -21,17 +20,14 @@ import {
     ExternalLink,
     Copy,
     CheckCircle2,
-    Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import confetti from "canvas-confetti";
 import { motion, type Variants } from "framer-motion";
 import { Sparkline } from "@/components/magicui/sparkline";
-import { useSendTransaction, useAccount } from "wagmi";
-import { getUniswapTransaction } from "@/lib/uniswap";
-import { evaluateStrategy } from "@/lib/zeroG";
 import { buildScheduleConfig } from "@/lib/hedera";
+import { CONTRACTS } from "@/lib/contracts";
 
 const containerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -56,78 +52,6 @@ export default function AgentDetailPage() {
     const { agent, loading } = useAgent(agentId);
     const { actions, isConnected, onNewAction } = useLiveActions(agentId);
     const [copied, setCopied] = useState(false);
-    const [isSwapping, setIsSwapping] = useState(false);
-    const [aiRecommendation, setAiRecommendation] = useState<{ action: string; protocol: string; asset: string; amount: string; confidence: number } | null>(null);
-    const [aiLoading, setAiLoading] = useState(false);
-
-    // Run 0G Compute inference on page load
-    useEffect(() => {
-        if (!agent) return;
-        setAiLoading(true);
-        evaluateStrategy(agent.id, agent.strategyHash, {
-            eth_price: 3200,
-            gas_gwei: 0.01,
-            aave_apy: 4.2,
-            compound_apy: 3.8,
-            uniswap_volume_24h: 850000000,
-        }).then(setAiRecommendation).finally(() => setAiLoading(false));
-    }, [agent]);
-
-    const { sendTransactionAsync } = useSendTransaction();
-    const { address } = useAccount();
-
-    const executeLiveSwap = async () => {
-        if (!address) {
-            toast.error("Wallet not connected", { description: "Please connect your wallet to execute a real swap." });
-            return;
-        }
-
-        setIsSwapping(true);
-        const toastId = toast.loading("Fetching live routing from Uniswap Dev API...");
-
-        try {
-            const WETH = "0x4200000000000000000000000000000000000006";
-            const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-            const amountStr = "0.0001";
-
-            const txData = await getUniswapTransaction(WETH, USDC, amountStr, 18, address, 84532);
-
-            if (!txData) {
-                toast.error("Uniswap API Failed", { id: toastId, description: "Could not generate routing data. Check API key." });
-                return;
-            }
-
-            toast.loading("Please sign the transaction in your wallet...", { id: toastId });
-
-            const hash = await sendTransactionAsync({
-                to: txData.to as `0x${string}`,
-                data: txData.data as `0x${string}`,
-                value: BigInt(txData.value || 0),
-            });
-
-            toast.success("Swap Executed On-Chain!", {
-                id: toastId,
-                description: `Tx Hash: ${hash.slice(0, 8)}...${hash.slice(-6)}`,
-                action: {
-                    label: "View Explorer",
-                    onClick: () => window.open(`https://sepolia.basescan.org/tx/${hash}`, "_blank"),
-                }
-            });
-
-            confetti({
-                particleCount: 100,
-                spread: 70,
-                origin: { y: 0.6 },
-                colors: ["#e8d5b7", "#c4956a"],
-            });
-
-        } catch (e: any) {
-            console.error(e);
-            toast.error("Transaction Failed", { id: toastId, description: e.message || "User rejected or simulation failed." });
-        } finally {
-            setIsSwapping(false);
-        }
-    };
 
     useEffect(() => {
         onNewAction((action) => {
@@ -175,7 +99,6 @@ export default function AgentDetailPage() {
 
     return (
         <div className="min-h-screen">
-            {/* Nav */}
             <nav className="border-b border-white/[0.06]">
                 <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
                     <div className="flex items-center gap-6">
@@ -211,16 +134,16 @@ export default function AgentDetailPage() {
                             <div className={`pulse-dot ${agent.active ? "" : "bg-neutral-600 !shadow-none"}`} />
                             <h1 className="text-4xl md:text-5xl">{agent.name}</h1>
                             <span className={`moonbird-badge ${agent.active ? "text-emerald-400 border-emerald-500/30" : ""}`}>
-                                {agent.active ? "Executing" : "Paused"}
+                                {agent.active ? "Active" : "Idle"}
                             </span>
                         </div>
                         <div className="flex items-center gap-4 text-sm text-neutral-500">
-                            <span className="font-mono">Sub-DAO #{agent.id}</span>
+                            <span className="font-mono">Agent #{agent.id}</span>
                             <button
                                 onClick={copyAddress}
                                 className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
                             >
-                                Treasury: {agent.boundAccount.slice(0, 10)}...
+                                TBA: {agent.boundAccount.slice(0, 10)}...
                                 {copied ? (
                                     <CheckCircle2 className="h-3 w-3 text-emerald-400" />
                                 ) : (
@@ -238,25 +161,15 @@ export default function AgentDetailPage() {
                         </div>
                     </div>
 
-                    <div className="flex flex-col items-end gap-3">
-                        <div className="flex items-center gap-3">
-                            <span className="moonbird-badge">
-                                <Timer className="h-3 w-3" />
-                                {agent.heartbeatInterval}s heartbeat
-                            </span>
-                            <span className="moonbird-badge">
-                                <Shield className="h-3 w-3" />
-                                Verified
-                            </span>
-                        </div>
-                        <Button
-                            onClick={executeLiveSwap}
-                            disabled={isSwapping}
-                            className="bg-white text-black hover:bg-neutral-200 rounded-full text-sm font-medium font-mono"
-                        >
-                            <Zap className="h-4 w-4 mr-2" />
-                            {isSwapping ? "Routing..." : "Execute Live Swap"}
-                        </Button>
+                    <div className="flex items-center gap-3">
+                        <span className="moonbird-badge">
+                            <Timer className="h-3 w-3" />
+                            {agent.heartbeatInterval}s heartbeat
+                        </span>
+                        <span className="moonbird-badge">
+                            <Shield className="h-3 w-3" />
+                            {agent.verified ? "Verified" : "Pending"}
+                        </span>
                     </div>
                 </motion.div>
 
@@ -302,8 +215,8 @@ export default function AgentDetailPage() {
                                 <Brain className="h-4 w-4" />
                                 <span className="text-xs uppercase tracking-wider">Strategy</span>
                             </div>
-                            <div className="text-sm font-mono truncate text-white">{agent.strategyHash.slice(0, 20)}...</div>
-                            <span className="text-xs text-neutral-500">Uniswap API Routing</span>
+                            <div className="text-sm font-mono truncate text-white">{agent.strategyHash}</div>
+                            <span className="text-xs text-neutral-500">On-chain config</span>
                         </div>
                     </motion.div>
                 </motion.div>
@@ -329,7 +242,7 @@ export default function AgentDetailPage() {
                     <Tabs defaultValue="activity" className="space-y-4">
                         <TabsList className="bg-[#0a0a0a] border border-white/[0.06]">
                             <TabsTrigger value="activity">Live Activity</TabsTrigger>
-                            <TabsTrigger value="ai">0G AI Brain</TabsTrigger>
+                            <TabsTrigger value="ai">Strategy Engine</TabsTrigger>
                             <TabsTrigger value="earnings">Earnings Chart</TabsTrigger>
                             <TabsTrigger value="config">Configuration</TabsTrigger>
                         </TabsList>
@@ -347,44 +260,38 @@ export default function AgentDetailPage() {
                         <TabsContent value="ai">
                             <div className="collection-card p-6 space-y-4">
                                 <h3 className="flex items-center gap-2 font-sans font-semibold">
-                                    <Brain className="h-5 w-5 text-emerald-400" />
-                                    0G Compute — AI Strategy Engine
+                                    <Brain className="h-5 w-5 text-neutral-300" />
+                                    On-Chain Strategy Engine
                                 </h3>
                                 <p className="text-sm text-neutral-500">
-                                    Real-time AI inference powered by 0G decentralized compute. The agent&apos;s brain evaluates market conditions and recommends the optimal DeFi action.
+                                    Strategy execution is driven by on-chain heartbeat state and BaseRelay action logs.
                                 </p>
-                                {aiLoading ? (
-                                    <div className="bg-black/40 rounded-xl p-6 border border-white/[0.04] flex items-center justify-center">
-                                        <span className="text-sm text-neutral-500 animate-pulse">Running 0G inference...</span>
+                                <div className="bg-black/40 rounded-xl p-6 border border-white/[0.04] space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs text-neutral-500 uppercase tracking-wider">Live Agent State</span>
+                                        <span className="moonbird-badge text-xs text-emerald-400 border-emerald-500/30">On-chain</span>
                                     </div>
-                                ) : aiRecommendation ? (
-                                    <div className="bg-black/40 rounded-xl p-6 border border-white/[0.04] space-y-3">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-xs text-neutral-500 uppercase tracking-wider">AI Recommendation</span>
-                                            <span className="moonbird-badge text-xs text-emerald-400 border-emerald-500/30">Live</span>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                        <div className="space-y-1">
+                                            <p className="text-xs text-neutral-500">Agent ID</p>
+                                            <p className="text-white font-mono text-sm">{agent.id}</p>
                                         </div>
-                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                            <div className="space-y-1">
-                                                <p className="text-xs text-neutral-500">Action</p>
-                                                <p className="text-white font-mono text-sm">{aiRecommendation.action}</p>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <p className="text-xs text-neutral-500">Protocol</p>
-                                                <p className="text-white font-mono text-sm">{aiRecommendation.protocol}</p>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <p className="text-xs text-neutral-500">Asset</p>
-                                                <p className="text-white font-mono text-sm">{aiRecommendation.asset}</p>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <p className="text-xs text-neutral-500">Confidence</p>
-                                                <p className="text-white font-mono text-sm">{(aiRecommendation.confidence * 100).toFixed(0)}%</p>
-                                            </div>
+                                        <div className="space-y-1">
+                                            <p className="text-xs text-neutral-500">Last Action</p>
+                                            <p className="text-white font-mono text-sm">{agent.lastActionType}</p>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <p className="text-xs text-neutral-500">Interval</p>
+                                            <p className="text-white font-mono text-sm">{agent.heartbeatInterval}s</p>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <p className="text-xs text-neutral-500">Verified</p>
+                                            <p className="text-white font-mono text-sm">{agent.verified ? "yes" : "no"}</p>
                                         </div>
                                     </div>
-                                ) : null}
+                                </div>
                                 <div className="bg-black/40 rounded-xl p-4 border border-white/[0.04]">
-                                    <p className="text-xs text-neutral-600 font-mono">Model: yield-strategy-v1 · Endpoint: {process.env.NEXT_PUBLIC_0G_COMPUTE_ENDPOINT || "compute-testnet.0g.ai"}</p>
+                                    <p className="text-xs text-neutral-600 font-mono">BaseRelay: {CONTRACTS.baseRelay}</p>
                                 </div>
                             </div>
                         </TabsContent>
@@ -398,10 +305,10 @@ export default function AgentDetailPage() {
                                     </h3>
                                 </div>
                                 <div className="h-[300px] flex items-center justify-center p-6">
-                                    {agent.earningsHistory.length > 0 ? (
+                                    {agent.earningsHistory.some(h => h.amount > 0) ? (
                                         <div className="w-full h-full relative flex items-center px-4">
                                             <Sparkline
-                                                data={agent.earningsHistory.map(h => ({ value: h.amount }))}
+                                                data={agent.earningsHistory.map((h) => ({ value: h.amount }))}
                                                 width={600}
                                                 height={200}
                                                 color="#e8d5b7"
@@ -411,7 +318,7 @@ export default function AgentDetailPage() {
                                     ) : (
                                         <div className="text-neutral-600 flex flex-col items-center justify-center h-full space-y-2">
                                             <Activity className="h-8 w-8" />
-                                            <p>No earnings history yet</p>
+                                            <p>No earnings yet — agent is awaiting first heartbeat execution</p>
                                         </div>
                                     )}
                                 </div>
@@ -425,44 +332,20 @@ export default function AgentDetailPage() {
                                     Agent Configuration
                                 </h3>
 
-                                {/* 0G Section */}
                                 <div className="space-y-2">
-                                    <p className="text-xs font-medium text-emerald-400 uppercase tracking-wider">0G Storage + Compute</p>
+                                    <p className="text-xs font-medium text-neutral-300 uppercase tracking-wider">Strategy Metadata</p>
                                     <div className="grid md:grid-cols-2 gap-4">
                                         <div className="bg-black/40 rounded-xl p-4 space-y-2 border border-white/[0.04]">
-                                            <span className="text-xs text-neutral-500">Strategy Hash (0G Storage)</span>
+                                            <span className="text-xs text-neutral-500">Strategy Hash</span>
                                             <p className="font-mono text-sm break-all text-white">{agent.strategyHash}</p>
                                         </div>
                                         <div className="bg-black/40 rounded-xl p-4 space-y-2 border border-white/[0.04]">
-                                            <span className="text-xs text-neutral-500">0G Compute Endpoint</span>
-                                            <p className="font-mono text-sm text-white">{process.env.NEXT_PUBLIC_0G_COMPUTE_ENDPOINT || "compute-testnet.0g.ai"}</p>
+                                            <span className="text-xs text-neutral-500">Last Action Type</span>
+                                            <p className="font-mono text-sm text-white">{agent.lastActionType}</p>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Kite Section */}
-                                <div className="space-y-2">
-                                    <p className="text-xs font-medium text-blue-400 uppercase tracking-wider">Kite x402 Identity</p>
-                                    <div className="grid md:grid-cols-2 gap-4">
-                                        <div className="bg-black/40 rounded-xl p-4 space-y-2 border border-white/[0.04]">
-                                            <span className="text-xs text-neutral-500">Kite Passport Status</span>
-                                            <p className="font-mono text-sm flex items-center gap-1.5 text-white">
-                                                <Shield className="h-3.5 w-3.5 text-blue-400" />
-                                                {agent.verified ? "Verified — x402 Active" : "Pending"}
-                                            </p>
-                                        </div>
-                                        <div className="bg-black/40 rounded-xl p-4 space-y-2 border border-white/[0.04]">
-                                            <span className="text-xs text-neutral-500">Capabilities</span>
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {["defi_swap", "defi_supply", "governance_vote"].map(c => (
-                                                    <span key={c} className="moonbird-badge text-xs">{c}</span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Hedera Section */}
                                 <div className="space-y-2">
                                     <p className="text-xs font-medium text-purple-400 uppercase tracking-wider">Hedera HIP-1215 Schedule</p>
                                     <div className="grid md:grid-cols-2 gap-4">
@@ -473,13 +356,12 @@ export default function AgentDetailPage() {
                                         <div className="bg-black/40 rounded-xl p-4 space-y-2 border border-white/[0.04]">
                                             <span className="text-xs text-neutral-500">Schedule Calldata</span>
                                             <p className="font-mono text-xs break-all text-neutral-400">
-                                                {buildScheduleConfig(agent.id, agent.heartbeatInterval, "0x0000000000000000000000000000000000000003").calldata}
+                                                {buildScheduleConfig(agent.id, agent.heartbeatInterval, CONTRACTS.baseRelay).calldata}
                                             </p>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Base Section */}
                                 <div className="space-y-2">
                                     <p className="text-xs font-medium text-white uppercase tracking-wider">Base ERC-4337 + ERC-6551</p>
                                     <div className="grid md:grid-cols-2 gap-4">

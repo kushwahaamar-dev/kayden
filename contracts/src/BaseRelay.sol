@@ -250,6 +250,16 @@ contract BaseRelay is IBaseRelay {
     }
 
     /// @dev Get agent config from NFT contract
+    struct AgentConfigResult {
+        string name;
+        string strategyHash;
+        uint256 heartbeatInterval;
+        address boundAccount;
+        uint256 totalEarnings;
+        uint256 totalActions;
+        bool active;
+    }
+
     function _getAgentConfig(uint256 agentId) internal view returns (
         string memory name,
         string memory strategyHash,
@@ -264,25 +274,10 @@ contract BaseRelay is IBaseRelay {
         );
 
         if (success && data.length > 0) {
-            // Decode the AgentConfig struct
-            (
-                name,
-                strategyHash,
-                heartbeatInterval,
-                boundAccount,
-                totalEarnings,
-                totalActions,
-                active
-            ) = abi.decode(data, (string, string, uint256, address, uint256, uint256, bool));
+            AgentConfigResult memory cfg = abi.decode(data, (AgentConfigResult));
+            return (cfg.name, cfg.strategyHash, cfg.heartbeatInterval, cfg.boundAccount, cfg.totalEarnings, cfg.totalActions, cfg.active);
         } else {
-            // Fallback defaults for testing
-            name = "Agent";
-            strategyHash = "default";
-            heartbeatInterval = 30;
-            boundAccount = address(this);
-            totalEarnings = 0;
-            totalActions = 0;
-            active = true;
+            return ("Agent", "default", 30, address(this), 0, 0, true);
         }
     }
 

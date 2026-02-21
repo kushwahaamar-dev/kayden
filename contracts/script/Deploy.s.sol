@@ -126,8 +126,8 @@ contract Deploy is Script {
 
         relay.registerAgent(agentId, 30); // 30-second heartbeat
 
-        // Fund paymaster for initial gas deposits
-        paymaster.depositForAgent{value: 0.01 ether}(agentId);
+        // Keep deployment faucet-friendly for hackathon testnets.
+        // Initial paymaster funding can be done manually post-deploy.
         paymaster.verifyAgent(agentId);
 
         vm_stopBroadcast();

@@ -22,7 +22,6 @@ Expand the **"Environment Variables"** section and add the following keys. These
 | Key Name | Value | Description |
 | :--- | :--- | :--- |
 | `NEXT_PUBLIC_UNISWAP_API_KEY` | *Your Uniswap API Key* | Required for live routing & quotes (Base Mainnet) |
-| `NEXT_PUBLIC_KITE_API_KEY` | *Your Kite API Key* | Required for Kite AI Agent Passports |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | *Your WC Project ID* | Required for Wagmi wallet connection |
 | `NEXT_PUBLIC_HEDERA_MIRROR_REST` | `https://testnet.mirrornode.hedera.com/api/v1` | Hedera data fetching |
 | `NEXT_PUBLIC_BASE_SEPOLIA_RPC` | `https://sepolia.base.org` | Wagmi default chain RPC |

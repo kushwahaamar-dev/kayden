@@ -15,17 +15,15 @@ import {
     TrendingUp,
     Zap,
     Brain,
-    Timer,
     Globe,
-    Sparkles,
     RefreshCw,
-    ExternalLink,
     ChevronRight,
 } from "lucide-react";
 import { motion, useScroll, useTransform, useInView } from "framer-motion";
 import { fetchTreasuryBalance } from "@/lib/nounsBuilder";
 import { getAccountTransactions } from "@/lib/hedera";
-import { fetchOptimalSwapRoute } from "@/lib/uniswap";
+import { useAllAgents } from "@/hooks/useAgent";
+import { toast } from "sonner";
 
 const STRATEGIES = [
     {
@@ -78,20 +76,15 @@ const BENEFITS = [
     {
         icon: <Shield className="h-6 w-6" />,
         title: "Verified identity",
-        desc: "Every agent carries a Kite x402 passport for secure, verified on-chain identity. No impersonation possible.",
+        desc: "Every agent has verifiable wallet and on-chain contract identity backed by NFT ownership and agent metadata.",
     },
     {
         icon: <RefreshCw className="h-6 w-6" />,
         title: "Protocol integrations",
-        desc: "Native integrations with Uniswap Developer APIs, 0G decentralized compute, Base ADI paymaster, and more.",
+        desc: "Native integrations with Uniswap Developer APIs, Hedera scheduling, and Base account abstraction.",
     },
 ];
 
-const AGENTS_SHOWCASE = [
-    { name: "Haven Alpha", strategy: "Aggressive Alpha", earnings: "12.847 ETH", actions: 4812, status: "Executing" },
-    { name: "Yield Guardian", strategy: "Conservative Yield", earnings: "3.219 ETH", actions: 1547, status: "Executing" },
-    { name: "DCA Sentinel", strategy: "DCA Accumulator", earnings: "7.103 ETH", actions: 2901, status: "Executing" },
-];
 
 function FadeInSection({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
     const ref = useRef(null);
@@ -111,9 +104,13 @@ function FadeInSection({ children, className = "", delay = 0 }: { children: Reac
 
 export default function LandingPage() {
     const { isConnected } = useAccount();
-    const { connect, connectors } = useConnect();
+    const { connectAsync, connectors } = useConnect();
+    const preferredConnector =
+        connectors.find((c) => c.name.toLowerCase().includes("coinbase")) ||
+        connectors[0];
+    const { agents: onChainAgents, stats: agentStats } = useAllAgents();
     const [activeStrategy, setActiveStrategy] = useState(0);
-    const [liveStats, setLiveStats] = useState({ treasury: 0, agents: 0, actions: 0, apy: 0 });
+    const [liveStats, setLiveStats] = useState({ treasury: 0, hederaTxs: 0 });
 
     const containerRef = useRef<HTMLDivElement>(null);
     const { scrollYProgress } = useScroll({ target: containerRef, offset: ["start start", "end end"] });
@@ -121,31 +118,42 @@ export default function LandingPage() {
 
     const currentStrategy = STRATEGIES[activeStrategy];
 
-    // Fetch real stats from live on-chain sources
+    const getErrorMessage = (err: unknown) => {
+        if (err instanceof Error) return err.message;
+        if (typeof err === "string") return err;
+        if (err && typeof err === "object" && "type" in err) {
+            return `Wallet request failed (${String((err as { type?: unknown }).type)})`;
+        }
+        return "Wallet connection failed. Please retry.";
+    };
+
+    const handleConnect = async () => {
+        if (!preferredConnector) {
+            toast.error("No wallet connector available");
+            return;
+        }
+        try {
+            await connectAsync({ connector: preferredConnector });
+        } catch (err) {
+            toast.error("Connection failed", { description: getErrorMessage(err) });
+        }
+    };
+
     useEffect(() => {
         async function fetchStats() {
-            const [treasury, hederaTxs, uniswapQuote] = await Promise.allSettled([
-                fetchTreasuryBalance(),
-                getAccountTransactions("0.0.7981295", 25),
-                fetchOptimalSwapRoute(
-                    "0x4200000000000000000000000000000000000006",
-                    "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                    "1", 18, 6
-                ),
-            ]);
-
-            const treasuryVal = treasury.status === "fulfilled" ? treasury.value : 0;
-            const actionCount = hederaTxs.status === "fulfilled" ? hederaTxs.value.length : 0;
-            const ethPrice = uniswapQuote.status === "fulfilled" ? parseFloat(uniswapQuote.value.quote) : 0;
-
-            setLiveStats({
-                treasury: treasuryVal,
-                agents: Math.max(actionCount * 3, 3), // Derive from real tx count
-                actions: actionCount,
-                apy: ethPrice > 0 ? +((ethPrice * 0.001 * 365) / ethPrice * 100).toFixed(1) : 0,
-            });
+            try {
+                const [treasury, hederaTxs] = await Promise.allSettled([
+                    fetchTreasuryBalance(),
+                    getAccountTransactions("0.0.7981295", 25),
+                ]);
+                setLiveStats({
+                    treasury: treasury.status === "fulfilled" ? treasury.value : 0,
+                    hederaTxs: hederaTxs.status === "fulfilled" ? hederaTxs.value.length : 0,
+                });
+            } catch {
+                setLiveStats({ treasury: 0, hederaTxs: 0 });
+            }
         }
-
         fetchStats();
         const interval = setInterval(fetchStats, 60000);
         return () => clearInterval(interval);
@@ -166,7 +174,7 @@ export default function LandingPage() {
                             <Link href="/" className="nav-link active">About</Link>
                             <Link href="/dashboard" className="nav-link">Dashboard</Link>
                             <Link href="/deploy" className="nav-link">Deploy</Link>
-                            <a href="https://github.com/kayden" target="_blank" rel="noreferrer" className="nav-link">GitHub</a>
+                            <a href="https://github.com/kayden" target="_blank" rel="noopener noreferrer" className="nav-link">GitHub</a>
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -180,7 +188,7 @@ export default function LandingPage() {
                             <Button
                                 size="sm"
                                 className="bg-white text-black hover:bg-neutral-200 rounded-full h-9 px-5 text-sm font-medium"
-                                onClick={() => connect({ connector: connectors[0] })}
+                                onClick={handleConnect}
                             >
                                 Connect Wallet
                             </Button>
@@ -207,7 +215,7 @@ export default function LandingPage() {
                         <div className="flex items-center gap-6 text-sm text-neutral-400">
                             <span className="font-mono">∞ autonomous agents</span>
                             <span className="text-neutral-600">·</span>
-                            <a href="https://twitter.com/kayden" target="_blank" rel="noreferrer" className="hover:text-white transition-colors">
+                            <a href="https://twitter.com/kayden" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">
                                 @kayden
                             </a>
                         </div>
@@ -228,7 +236,7 @@ export default function LandingPage() {
                                 <Button
                                     size="lg"
                                     className="bg-white text-black hover:bg-neutral-200 rounded-full h-12 px-8 text-sm font-medium"
-                                    onClick={() => connect({ connector: connectors[0] })}
+                                    onClick={handleConnect}
                                 >
                                     <TerminalSquare className="h-4 w-4 mr-2" />
                                     Connect to DAO
@@ -254,20 +262,20 @@ export default function LandingPage() {
                             </div>
                             <div className="grid grid-cols-2 gap-6">
                                 <div className="space-y-1">
-                                    <p className="text-xs text-neutral-500 uppercase tracking-wider">Treasury</p>
+                                    <p className="text-xs text-neutral-500 uppercase tracking-wider">DAO Treasury</p>
                                     <p className="text-3xl font-mono text-white">{liveStats.treasury > 0 ? liveStats.treasury.toFixed(2) : "--"} <span className="text-lg text-neutral-500">ETH</span></p>
                                 </div>
                                 <div className="space-y-1">
-                                    <p className="text-xs text-neutral-500 uppercase tracking-wider">Active Agents</p>
-                                    <p className="text-3xl font-mono text-white">{liveStats.agents || "--"}</p>
+                                    <p className="text-xs text-neutral-500 uppercase tracking-wider">Agents On-chain</p>
+                                    <p className="text-3xl font-mono text-white">{agentStats.totalAgents || "--"}</p>
                                 </div>
                                 <div className="space-y-1">
-                                    <p className="text-xs text-neutral-500 uppercase tracking-wider">Hedera Txs</p>
-                                    <p className="text-3xl font-mono text-white">{liveStats.actions || "--"}</p>
+                                    <p className="text-xs text-neutral-500 uppercase tracking-wider">Heartbeats</p>
+                                    <p className="text-3xl font-mono text-white">{agentStats.totalActions || "--"}</p>
                                 </div>
                                 <div className="space-y-1">
-                                    <p className="text-xs text-neutral-500 uppercase tracking-wider">Est. APY</p>
-                                    <p className="text-3xl font-mono text-white">{liveStats.apy > 0 ? liveStats.apy : "--"}<span className="text-lg text-neutral-500">%</span></p>
+                                    <p className="text-xs text-neutral-500 uppercase tracking-wider">Agent Earnings</p>
+                                    <p className="text-3xl font-mono text-white">{agentStats.totalEarnings > 0 ? agentStats.totalEarnings.toFixed(2) : "--"} <span className="text-lg text-neutral-500">ETH</span></p>
                                 </div>
                             </div>
                             <div className="pt-4 border-t border-white/[0.06] flex items-center gap-2 text-xs text-neutral-500">
@@ -340,7 +348,7 @@ export default function LandingPage() {
                                 </div>
                             </div>
                             <p className="text-neutral-400 leading-relaxed">
-                                Agent memory and strategy are stored entirely on-chain via 0G decentralized compute. Hedera HIP-1215 pulses every 30s. Base ADI paymaster funds gas. True perpetual execution — no servers, no downtime, no kill switch.
+                                Agent state and execution metrics are read from deployed contracts. Hedera HIP-1215 pulses every 30s. Base ADI paymaster funds gas. True perpetual execution — no servers, no downtime, no kill switch.
                             </p>
                             <Link href="/deploy" className="inline-flex items-center gap-1.5 text-sm text-white hover:text-neutral-300 transition-colors">
                                 Deploy an agent <ChevronRight className="h-4 w-4" />
@@ -373,50 +381,66 @@ export default function LandingPage() {
                 </div>
             </FadeInSection>
 
-            {/* ═══ Agent Showcase (Diamond Exhibition equivalent) ═══ */}
+            {/* ═══ Live Agents (real on-chain data) ═══ */}
             <FadeInSection className="proof-section">
                 <div className="max-w-7xl mx-auto px-6 py-20">
                     <div className="flex items-end justify-between mb-12">
                         <div>
-                            <h2 className="text-4xl md:text-5xl mb-4">Agent showcase</h2>
-                            <p className="text-neutral-400 text-lg">Top-performing autonomous agents in the ecosystem.</p>
+                            <h2 className="text-4xl md:text-5xl mb-4">Live agents</h2>
+                            <p className="text-neutral-400 text-lg">Deployed on Base Sepolia — all data read from contracts.</p>
                         </div>
                         <Link href="/dashboard" className="hidden md:inline-flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white transition-colors">
-                            View all agents <ArrowRight className="h-4 w-4" />
+                            View dashboard <ArrowRight className="h-4 w-4" />
                         </Link>
                     </div>
 
-                    <div className="grid md:grid-cols-3 gap-6">
-                        {AGENTS_SHOWCASE.map((agent, i) => (
-                            <FadeInSection key={i} delay={i * 0.1}>
-                                <div className="showcase-card">
-                                    {/* Top gradient strip */}
-                                    <div className="h-32 bg-gradient-to-br from-white/[0.03] to-transparent relative">
-                                        <div className="absolute bottom-4 left-6 right-6 flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <div className="h-2 w-2 rounded-full bg-emerald-400" />
-                                                <span className="text-xs text-emerald-400">{agent.status}</span>
+                    {onChainAgents.length === 0 ? (
+                        <div className="collection-card p-12 text-center space-y-4">
+                            <Bot className="h-10 w-10 mx-auto text-neutral-600" />
+                            <p className="text-neutral-500">Loading agents from Base Sepolia...</p>
+                        </div>
+                    ) : (
+                        <div className="grid md:grid-cols-3 gap-6">
+                            {onChainAgents.slice(0, 6).map((agent, i) => (
+                                <FadeInSection key={agent.id} delay={i * 0.1}>
+                                    <Link href={`/agents/${agent.id}`}>
+                                        <div className="showcase-card hover:border-white/[0.15] transition-all cursor-pointer">
+                                            <div className="h-24 bg-gradient-to-br from-white/[0.03] to-transparent relative">
+                                                <div className="absolute bottom-4 left-6 right-6 flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`h-2 w-2 rounded-full ${agent.active ? "bg-emerald-400" : "bg-neutral-600"}`} />
+                                                        <span className={`text-xs ${agent.active ? "text-emerald-400" : "text-neutral-500"}`}>
+                                                            {agent.active ? "Active" : "Idle"}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-xs font-mono text-neutral-600">#{agent.id}</span>
+                                                </div>
                                             </div>
-                                            <span className="text-xs font-mono text-neutral-600">{agent.strategy}</span>
+                                            <div className="p-6 space-y-4">
+                                                <div className="flex items-center justify-between">
+                                                    <h3 className="text-xl font-sans font-semibold">{agent.name}</h3>
+                                                    <span className="moonbird-badge text-[10px]">{agent.strategyHash}</span>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div>
+                                                        <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Earnings</p>
+                                                        <p className="font-mono text-lg text-white">{agent.totalEarnings.toFixed(4)} ETH</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Actions</p>
+                                                        <p className="font-mono text-lg text-white">{agent.totalActions}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="pt-2 border-t border-white/[0.06] text-[10px] font-mono text-neutral-600">
+                                                    TBA: {agent.boundAccount.slice(0, 10)}...{agent.boundAccount.slice(-4)}
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="p-6 space-y-4">
-                                        <h3 className="text-xl font-sans font-semibold">{agent.name}</h3>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Earnings</p>
-                                                <p className="font-mono text-lg text-white">{agent.earnings}</p>
-                                            </div>
-                                            <div>
-                                                <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Actions</p>
-                                                <p className="font-mono text-lg text-white">{agent.actions.toLocaleString()}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </FadeInSection>
-                        ))}
-                    </div>
+                                    </Link>
+                                </FadeInSection>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </FadeInSection>
 
@@ -430,7 +454,7 @@ export default function LandingPage() {
                         </div>
                         <ChevronRight className="h-4 w-4 text-neutral-700 rotate-90 md:rotate-0" />
                         <div className="px-6 py-3 text-neutral-500 border border-white/[0.06] rounded-2xl">
-                            0G AI Strategy
+                            Strategy Evaluation
                         </div>
                         <ChevronRight className="h-4 w-4 text-neutral-700 rotate-90 md:rotate-0" />
                         <div className="collection-card px-6 py-3 text-white font-medium">
@@ -472,31 +496,31 @@ export default function LandingPage() {
                             <div className="space-y-3">
                                 <Link href="/dashboard" className="footer-link block">Dashboard</Link>
                                 <Link href="/deploy" className="footer-link block">Deploy</Link>
-                                <a href="https://github.com/kayden" target="_blank" rel="noreferrer" className="footer-link block">GitHub</a>
+                                <a href="https://github.com/kayden" target="_blank" rel="noopener noreferrer" className="footer-link block">GitHub</a>
                             </div>
                         </div>
                         <div className="space-y-4">
                             <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Ecosystem</p>
                             <div className="space-y-3">
-                                <a href="https://github.com/kayden" target="_blank" rel="noreferrer" className="footer-link block">Documentation</a>
-                                <a href="https://nouns.build" target="_blank" rel="noreferrer" className="footer-link block">Nouns Builder</a>
-                                <a href="https://uniswap.org" target="_blank" rel="noreferrer" className="footer-link block">Uniswap</a>
+                                <a href="https://github.com/kayden" target="_blank" rel="noopener noreferrer" className="footer-link block">Documentation</a>
+                                <a href="https://nouns.build" target="_blank" rel="noopener noreferrer" className="footer-link block">Nouns Builder</a>
+                                <a href="https://uniswap.org" target="_blank" rel="noopener noreferrer" className="footer-link block">Uniswap</a>
                             </div>
                         </div>
                         <div className="space-y-4">
                             <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Community</p>
                             <div className="space-y-3">
-                                <a href="https://twitter.com/kayden" target="_blank" rel="noreferrer" className="footer-link block">Twitter</a>
-                                <a href="https://discord.gg" target="_blank" rel="noreferrer" className="footer-link block">Discord</a>
-                                <a href="https://ethdenver.com" target="_blank" rel="noreferrer" className="footer-link block">ETH Denver 2026</a>
+                                <a href="https://twitter.com/kayden" target="_blank" rel="noopener noreferrer" className="footer-link block">Twitter</a>
+                                <a href="https://discord.gg" target="_blank" rel="noopener noreferrer" className="footer-link block">Discord</a>
+                                <a href="https://ethdenver.com" target="_blank" rel="noopener noreferrer" className="footer-link block">ETH Denver 2026</a>
                             </div>
                         </div>
                         <div className="space-y-4">
                             <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Explorers</p>
                             <div className="space-y-3">
-                                <a href="https://basescan.org" target="_blank" rel="noreferrer" className="footer-link block">BaseScan</a>
-                                <a href="https://hashscan.io" target="_blank" rel="noreferrer" className="footer-link block">HashScan</a>
-                                <a href="https://uniswap.org/developers" target="_blank" rel="noreferrer" className="footer-link block">Uniswap APIs</a>
+                                <a href="https://basescan.org" target="_blank" rel="noopener noreferrer" className="footer-link block">BaseScan</a>
+                                <a href="https://hashscan.io" target="_blank" rel="noopener noreferrer" className="footer-link block">HashScan</a>
+                                <a href="https://uniswap.org/developers" target="_blank" rel="noopener noreferrer" className="footer-link block">Uniswap APIs</a>
                             </div>
                         </div>
                     </div>

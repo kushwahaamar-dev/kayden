@@ -100,13 +100,13 @@ export function LiveActivityFeed({
                                                 </a>
                                             ) : (
                                                 <a
-                                                    href="https://basescan.org/address/0xd0b53D9277642d899DF5C87A3966A349A798F224"
+                                                    href={`https://sepolia.basescan.org/tx/${action.txHash}`}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="flex items-center gap-0.5 hover:text-white transition-colors"
                                                     onClick={(e) => e.stopPropagation()}
                                                 >
-                                                    Pool <ExternalLink className="h-2.5 w-2.5" />
+                                                    Tx <ExternalLink className="h-2.5 w-2.5" />
                                                 </a>
                                             )}
                                         </div>

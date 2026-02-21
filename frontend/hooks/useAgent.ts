@@ -1,17 +1,25 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ACTION_TYPE_LABELS } from "@/lib/contracts";
-import { fetchTreasuryBalance } from "@/lib/nounsBuilder";
-import { fetchOptimalSwapRoute } from "@/lib/uniswap";
-import { getAccountTransactions } from "@/lib/hedera";
+import { createPublicClient, http } from "viem";
+import { baseSepolia } from "viem/chains";
+import { ACTION_TYPE_LABELS, AGENT_HAVEN_NFT_ABI, BASE_RELAY_ABI, CONTRACTS, PAYMASTER_ABI } from "@/lib/contracts";
 
-// ═══════════════════════════════════════════════════════════════════
-// useAgent — Agent data powered by real on-chain sources:
-//   1. Nouns Builder treasury balance (live via viem on Base)
-//   2. Uniswap QuoterV2 live price data for earnings estimation
-//   3. Hedera Mirror Node for real transaction counts
-// ═══════════════════════════════════════════════════════════════════
+const RPC = process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC || "https://sepolia.base.org";
+
+function getClient() {
+    return createPublicClient({
+        chain: baseSepolia,
+        transport: http(RPC),
+        batch: { multicall: true },
+    });
+}
+
+const isPlaceholderAddress = (value: string) =>
+    /^0x0{39}[0-9a-fA-F]$/.test(value) || /^0x0+$/.test(value);
+
+const isConfiguredAddress = (value: string) =>
+    value.length === 42 && !isPlaceholderAddress(value);
 
 export interface AgentData {
     id: number;
@@ -29,70 +37,134 @@ export interface AgentData {
     earningsHistory: { amount: number }[];
 }
 
-// Agent configurations — these represent deployed agent identities.
-// Earnings and actions are populated from real on-chain data.
-const AGENT_CONFIGS = [
-    {
-        id: 1,
-        name: "Haven Alpha",
-        strategyHash: "QmYieldFarmerV1StrategyHash0G",
-        heartbeatInterval: 30,
-        boundAccount: "0x72b052a9a830001ce202ad907e6eedd0b86c4a88", // Real Nouns DAO treasury on Base
-        lastActionType: "Swap",
-    },
-    {
-        id: 2,
-        name: "Yield Hunter",
-        strategyHash: "QmAggressive8xLeverageStrategy",
-        heartbeatInterval: 60,
-        boundAccount: "0x8Ba1f109551bD432803012645Ac136ddd64DBA72",
-        lastActionType: "Route Optimized",
-    },
-    {
-        id: 3,
-        name: "DeFi Sentinel",
-        strategyHash: "QmConservativeAaveSupplyOnly",
-        heartbeatInterval: 120,
-        boundAccount: "0x2546BcD3c84621e976D8185a91A922aE77ECEc30",
-        lastActionType: "AI Rebalance",
-    },
-];
-
-// Hedera testnet account for fetching real transaction counts
-const HEDERA_ACCOUNT = "0.0.7981295";
-
-// Fetch real earnings from live Uniswap quote data
-async function fetchLiveEarnings(): Promise<number> {
-    try {
-        const WETH = "0x4200000000000000000000000000000000000006";
-        const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-        const route = await fetchOptimalSwapRoute(WETH, USDC, "1", 18, 6);
-        // Earnings estimate: real ETH price from Uniswap QuoterV2 × position size
-        const ethPrice = parseFloat(route.quote);
-        return ethPrice > 0 ? (ethPrice * 0.001 * 3) : 0; // 0.1% yield on 3 ETH position
-    } catch {
-        return 0;
+function buildEarningsHistory(baseEarnings: number, totalActions: number, points: number = 24): { amount: number }[] {
+    if (baseEarnings <= 0 || totalActions <= 0) return [];
+    const perAction = baseEarnings / totalActions;
+    const filled = Math.min(totalActions, points);
+    const history: { amount: number }[] = [];
+    for (let i = 0; i < filled; i++) {
+        history.push({ amount: +((i + 1) * perAction).toFixed(4) });
     }
+    return history;
 }
 
-// Fetch real transaction count from Hedera Mirror Node
-async function fetchRealActionCount(): Promise<number> {
-    try {
-        const txs = await getAccountTransactions(HEDERA_ACCOUNT, 25);
-        return txs.filter(tx => tx.result === "SUCCESS").length;
-    } catch {
-        return 0;
+function parseAgent(id: number, config: any, relayStats: any, lastAction: any, pmStats: any): AgentData {
+    const relay = {
+        totalActions: 0, totalEarnings: 0, nextBeat: 0, isActive: false,
+    };
+    let lastActionType = 0;
+    let paymasterDeposit = 0;
+    let verified = false;
+
+    if (relayStats) {
+        try {
+            relay.totalActions = Number(relayStats[0]);
+            relay.totalEarnings = Number(relayStats[1]) / 1e18;
+            relay.nextBeat = Number(relayStats[2]);
+            relay.isActive = Boolean(relayStats[3]);
+        } catch { /* partial decode */ }
     }
+    if (lastAction) {
+        try { lastActionType = Number(lastAction.actionType); } catch { /* */ }
+    }
+    if (pmStats) {
+        try {
+            paymasterDeposit = Number(pmStats[0]) / 1e18;
+            verified = Boolean(pmStats[2]);
+        } catch { /* */ }
+    }
+
+    const isActive = Boolean(config?.active) || relay.isActive;
+
+    return {
+        id,
+        name: config?.name || `Agent #${id}`,
+        strategyHash: config?.strategyHash || "unknown",
+        heartbeatInterval: Number(config?.heartbeatInterval) || 30,
+        boundAccount: config?.boundAccount || "0x0000000000000000000000000000000000000000",
+        totalEarnings: relay.totalEarnings,
+        totalActions: relay.totalActions,
+        active: isActive,
+        nextHeartbeat: relay.nextBeat,
+        lastActionType: ACTION_TYPE_LABELS[lastActionType] || "Supply",
+        paymasterDeposit,
+        verified,
+        earningsHistory: buildEarningsHistory(relay.totalEarnings, relay.totalActions),
+    };
 }
 
-// Build earnings history from Uniswap quote data
-function buildEarningsHistory(baseEarnings: number, points: number = 24): { amount: number }[] {
-    if (baseEarnings <= 0) return Array.from({ length: points }, () => ({ amount: 0 }));
+async function fetchAllAgentsBatched(client: ReturnType<typeof getClient>): Promise<AgentData[]> {
+    const total = await client.readContract({
+        address: CONTRACTS.agentHavenNFT,
+        abi: AGENT_HAVEN_NFT_ABI,
+        functionName: "totalAgents",
+    });
 
-    // Generate a realistic curve based on actual earnings figure
-    return Array.from({ length: points }, (_, i) => ({
-        amount: +(baseEarnings * (i / (points - 1)) * (0.85 + (Math.sin(i * 0.5) * 0.15))).toFixed(4)
-    }));
+    const count = Number(total);
+    if (!count) return [];
+
+    const ids = Array.from({ length: count }, (_, i) => i + 1);
+    const hasRelay = isConfiguredAddress(CONTRACTS.baseRelay);
+    const hasPM = isConfiguredAddress(CONTRACTS.paymaster);
+
+    const calls: any[] = [];
+    const callMap: { id: number; field: string; idx: number }[] = [];
+
+    for (const id of ids) {
+        callMap.push({ id, field: "config", idx: calls.length });
+        calls.push({
+            address: CONTRACTS.agentHavenNFT,
+            abi: AGENT_HAVEN_NFT_ABI,
+            functionName: "getAgentConfig",
+            args: [BigInt(id)],
+        });
+
+        if (hasRelay) {
+            callMap.push({ id, field: "relayStats", idx: calls.length });
+            calls.push({
+                address: CONTRACTS.baseRelay,
+                abi: BASE_RELAY_ABI,
+                functionName: "getAgentStats",
+                args: [BigInt(id)],
+            });
+            callMap.push({ id, field: "lastAction", idx: calls.length });
+            calls.push({
+                address: CONTRACTS.baseRelay,
+                abi: BASE_RELAY_ABI,
+                functionName: "getLastAction",
+                args: [BigInt(id)],
+            });
+        }
+
+        if (hasPM) {
+            callMap.push({ id, field: "pmStats", idx: calls.length });
+            calls.push({
+                address: CONTRACTS.paymaster,
+                abi: PAYMASTER_ABI,
+                functionName: "getAgentGasStats",
+                args: [BigInt(id)],
+            });
+        }
+    }
+
+    const results = await client.multicall({ contracts: calls, allowFailure: true });
+
+    const agentDataMap = new Map<number, Record<string, any>>();
+    for (const entry of callMap) {
+        if (!agentDataMap.has(entry.id)) agentDataMap.set(entry.id, {});
+        const r = results[entry.idx];
+        if (r.status === "success") {
+            agentDataMap.get(entry.id)![entry.field] = r.result;
+        }
+    }
+
+    const agents: AgentData[] = [];
+    for (const id of ids) {
+        const data = agentDataMap.get(id);
+        if (!data?.config) continue;
+        agents.push(parseAgent(id, data.config, data.relayStats, data.lastAction, data.pmStats));
+    }
+    return agents;
 }
 
 export function useAgent(agentId?: number) {
@@ -100,43 +172,47 @@ export function useAgent(agentId?: number) {
     const [loading, setLoading] = useState(true);
 
     const fetchAgent = useCallback(async () => {
-        const config = AGENT_CONFIGS.find((a) => a.id === agentId);
-        if (!config) {
+        if (!agentId || !isConfiguredAddress(CONTRACTS.agentHavenNFT)) {
             setAgent(null);
             setLoading(false);
             return;
         }
 
-        // Fetch real data from multiple sources in parallel
-        const [treasury, earnings, actionCount] = await Promise.allSettled([
-            fetchTreasuryBalance(),
-            fetchLiveEarnings(),
-            fetchRealActionCount(),
-        ]);
+        try {
+            const client = getClient();
+            const hasRelay = isConfiguredAddress(CONTRACTS.baseRelay);
+            const hasPM = isConfiguredAddress(CONTRACTS.paymaster);
 
-        const treasuryBalance = treasury.status === "fulfilled" ? treasury.value : 0;
-        const realEarnings = earnings.status === "fulfilled" ? earnings.value : 0;
-        const realActions = actionCount.status === "fulfilled" ? actionCount.value : 0;
+            const calls: any[] = [
+                { address: CONTRACTS.agentHavenNFT, abi: AGENT_HAVEN_NFT_ABI, functionName: "getAgentConfig", args: [BigInt(agentId)] },
+            ];
+            if (hasRelay) {
+                calls.push({ address: CONTRACTS.baseRelay, abi: BASE_RELAY_ABI, functionName: "getAgentStats", args: [BigInt(agentId)] });
+                calls.push({ address: CONTRACTS.baseRelay, abi: BASE_RELAY_ABI, functionName: "getLastAction", args: [BigInt(agentId)] });
+            }
+            if (hasPM) {
+                calls.push({ address: CONTRACTS.paymaster, abi: PAYMASTER_ABI, functionName: "getAgentGasStats", args: [BigInt(agentId)] });
+            }
 
-        const now = Math.floor(Date.now() / 1000);
-        const elapsed = now % config.heartbeatInterval;
+            const results = await client.multicall({ contracts: calls, allowFailure: true });
 
-        setAgent({
-            ...config,
-            totalEarnings: realEarnings > 0 ? realEarnings : treasuryBalance * 0.001,
-            totalActions: realActions,
-            active: true,
-            nextHeartbeat: now + (config.heartbeatInterval - elapsed),
-            paymasterDeposit: treasuryBalance * 0.01, // 1% of treasury for gas
-            verified: true,
-            earningsHistory: buildEarningsHistory(realEarnings > 0 ? realEarnings : treasuryBalance * 0.001),
-        });
-        setLoading(false);
+            let idx = 0;
+            const config = results[idx++]?.status === "success" ? results[idx - 1].result : null;
+            const relayStats = hasRelay && results[idx]?.status === "success" ? results[idx++].result : (hasRelay && idx++, null);
+            const lastAction = hasRelay && results[idx]?.status === "success" ? results[idx++].result : (hasRelay && idx++, null);
+            const pmStats = hasPM && results[idx]?.status === "success" ? results[idx].result : null;
+
+            if (!config) { setAgent(null); return; }
+            setAgent(parseAgent(agentId, config, relayStats, lastAction, pmStats));
+        } catch {
+            setAgent(null);
+        } finally {
+            setLoading(false);
+        }
     }, [agentId]);
 
     useEffect(() => {
         fetchAgent();
-        // Refresh every 30 seconds with fresh on-chain data
         const interval = setInterval(fetchAgent, 30000);
         return () => clearInterval(interval);
     }, [fetchAgent]);
@@ -150,39 +226,22 @@ export function useAllAgents() {
 
     useEffect(() => {
         async function fetchAll() {
-            // Fetch real data from live sources
-            const [treasury, earnings, actionCount] = await Promise.allSettled([
-                fetchTreasuryBalance(),
-                fetchLiveEarnings(),
-                fetchRealActionCount(),
-            ]);
+            if (!isConfiguredAddress(CONTRACTS.agentHavenNFT)) {
+                setAgents([]);
+                setLoading(false);
+                return;
+            }
 
-            const treasuryBalance = treasury.status === "fulfilled" ? treasury.value : 0;
-            const realEarnings = earnings.status === "fulfilled" ? earnings.value : 0;
-            const realActions = actionCount.status === "fulfilled" ? actionCount.value : 0;
-
-            const now = Math.floor(Date.now() / 1000);
-
-            const liveAgents = AGENT_CONFIGS.map((config, i) => ({
-                ...config,
-                totalEarnings: (realEarnings > 0 ? realEarnings : treasuryBalance * 0.001) * (1 + i * 0.3),
-                totalActions: Math.max(realActions + i * 5, i * 10),
-                active: true,
-                nextHeartbeat: now + (config.heartbeatInterval - (now % config.heartbeatInterval)),
-                paymasterDeposit: treasuryBalance * 0.01 * (1 + i * 0.2),
-                verified: true,
-                earningsHistory: buildEarningsHistory(
-                    (realEarnings > 0 ? realEarnings : treasuryBalance * 0.001) * (1 + i * 0.3)
-                ),
-            }));
-
-            setAgents(liveAgents);
-            setLoading(false);
+            try {
+                const client = getClient();
+                const loaded = await fetchAllAgentsBatched(client);
+                setAgents(loaded);
+            } catch { /* silent */ } finally {
+                setLoading(false);
+            }
         }
 
         fetchAll();
-
-        // Refresh real data every 30 seconds
         const interval = setInterval(fetchAll, 30000);
         return () => clearInterval(interval);
     }, []);
