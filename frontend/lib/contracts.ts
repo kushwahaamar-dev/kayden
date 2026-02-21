@@ -7,12 +7,19 @@
 // Run `forge script Deploy.s.sol --rpc-url base-sepolia --broadcast` to deploy
 // Then update these addresses with the deployed contract addresses
 
+function cleanAddress(raw: string | undefined, fallback: `0x${string}`): `0x${string}` {
+    if (!raw) return fallback;
+    const cleaned = raw.trim().replace(/^['"]|['"]$/g, "");
+    if (!/^0x[0-9a-fA-F]{40}$/.test(cleaned)) return fallback;
+    return cleaned as `0x${string}`;
+}
+
 export const CONTRACTS = {
-    agentHavenNFT: (process.env.NEXT_PUBLIC_NFT_ADDRESS || "0x0000000000000000000000000000000000000001") as `0x${string}`,
-    tbaRegistry: (process.env.NEXT_PUBLIC_TBA_REGISTRY || "0x000000006551c19487814612e58FE06813775758") as `0x${string}`,
-    baseRelay: (process.env.NEXT_PUBLIC_RELAY_ADDRESS || "0x0000000000000000000000000000000000000003") as `0x${string}`,
-    defiModules: (process.env.NEXT_PUBLIC_DEFI_MODULES || "0x0000000000000000000000000000000000000004") as `0x${string}`,
-    paymaster: (process.env.NEXT_PUBLIC_PAYMASTER_ADDRESS || "0x0000000000000000000000000000000000000005") as `0x${string}`,
+    agentHavenNFT: cleanAddress(process.env.NEXT_PUBLIC_NFT_ADDRESS, "0x0000000000000000000000000000000000000001"),
+    tbaRegistry: cleanAddress(process.env.NEXT_PUBLIC_TBA_REGISTRY, "0x000000006551c19487814612e58FE06813775758"),
+    baseRelay: cleanAddress(process.env.NEXT_PUBLIC_RELAY_ADDRESS, "0x0000000000000000000000000000000000000003"),
+    defiModules: cleanAddress(process.env.NEXT_PUBLIC_DEFI_MODULES, "0x0000000000000000000000000000000000000004"),
+    paymaster: cleanAddress(process.env.NEXT_PUBLIC_PAYMASTER_ADDRESS, "0x0000000000000000000000000000000000000005"),
     entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032" as `0x${string}`, // ERC-4337 v0.7 canonical
 } as const;
 
